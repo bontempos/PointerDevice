@@ -1,5 +1,7 @@
 package bontempos.PointerDevice;
 
+import java.util.ArrayList;
+
 import bontempos.Game.Act.Action;
 import bontempos.Game.Act.ActionList;
 import bontempos.Game.Act.Checker;
@@ -12,33 +14,34 @@ import processing.core.PVector;
 
 
 public class PointerDevice extends PVector  {
-	
+
 	public final int     laserMaxBrightness   =   255;
-	public final float   servoSpeed           =   (float) (0.1/60f) ; //0.1/60 * 4; //for each angle, it takes 't' time to move.
 	public final float[] servoRangeX          =   {0f, 180f}; 
 	public final float[] servoRangeY          =   {0f, 180f};
-	public final float   targetDistTolerance  =   (float) 0.1;        //detects when servos needs to start moving
+	public final float   targetDistTolerance  =   1f;        //detects when servos needs to start moving
 	public final PVector initialPosition 	  =   new PVector(90,90);	//middle of servo (if 180)
-	
+	public float  servoSpeed           =   120f/60f; //in 120ms it moves 60º
+
 	//LASER
 	public int id;
 	public byte laser, plaser;
 
 	//MOVEMENT
+	boolean onMovement				   =   false;
 	float speed                        =   1f;        				//increment mult for speed
 	boolean enableAccel                =   false;
-	boolean allowRetargeting           =   true;      		     	//if allowRetargeting is true and target changes, trajectory will be recalculated and restarted
+	boolean allowRetargeting           =   false;      		     	//if allowRetargeting is true and target changes, trajectory will be recalculated and restarted
 	boolean enableHomography           =   true;
-	float trajectorySpanX;
-	float trajectorySpanY;
-	float moveInterval;
+	int moveInterval;
 	int moveStartTime;
-	boolean moving                     =   false;          			//when false, calculates a trajectory path to the target and set moving to true
-	boolean motorBusy                  =   false;            		//motor is currently executing a trajectory segment and cannot accept other instructions
-	Checker motorBusyChecker;
-	PVector target                     =   new PVector();
-	PVector ipos                       =   new PVector();  			//initial position before start moving
+	boolean onTarget                   =   false;          			//when false, calculates a trajectory path to the target and set moving to true
+	//boolean servoBusy                  =   false;            		//motor is currently executing a trajectory segment and cannot accept other instructions
+
+	ArrayList<PVector> targetList 	   =   new ArrayList<PVector>();//list of (extra/stored) targets to perform
+	PVector target                     =   new PVector();			//current target (the last in the target list). Target can't never be null. This is how system knows if must start moving or its idle, comparing current position and target
 	PVector ppos                       =   new PVector();  			//last frame/step position
+	ArrayList<PVector>trajectoryPoints;		
+	int trajectorySteps;
 
 	//STATE FLAGS
 	boolean invertY                    =   false;
@@ -48,14 +51,14 @@ public class PointerDevice extends PVector  {
 	boolean error;
 
 	//VISUAL AID
-	int idColor                        =   0xaa55dd;
-	int idColorError                   =   0xff0000;
+	int idColor                        =   0xffaa55dd;
+	int idColorError                   =   0x00ff0000;
 	PShape activeArea;
 
 
 	//CALIBRATION
 	//boolean onCalibration               =   false;					//homographic and projMatrix setting of vertices
-	
+
 	//HOMOGRAPHY
 	float[] fpos                        =   new float[2];   		//final position (if homography is used)
 	float[] pfpos                       =   new float[2];   		//previous final position
@@ -101,13 +104,15 @@ public class PointerDevice extends PVector  {
 
 
 	public PointerDevice() {
-		
+
 		System.out.println("Pointer");
 		linesToDraw = new ActionList();
-		
+
 		PointerController.getParent().registerMethod("draw", this);
 		this.x = initialPosition.x;
 		this.y = initialPosition.y;
+		target.x = x; //stabilizing position (current == target)
+		target.y = y; //stabilizing position (current == target)
 		id = PointerController.pointers.size();
 		detectLaserChange = new Checker("laserChange"+id, this, "onLaserChange"); 
 		detectLaserChange.setPermanent(true);
@@ -118,10 +123,11 @@ public class PointerDevice extends PVector  {
 		//linesToDraw.setAutoClear( true );
 		activeArea =  cornerShape(); //tmp
 		buildHMatrix();
+		trajectoryPoints = new ArrayList<PVector>(); //TODO this might be not the right place (needs a "clear" when all pointers have no trajectory scheduled)
 		System.out.println("Pointer " + id + " created");
 	}
-	
-	
+
+
 	public void draw() {
 		if(active){
 			update();
@@ -130,15 +136,11 @@ public class PointerDevice extends PVector  {
 
 
 	void update(){
+		updateMove(); //if target is different of current position
+
 		//return feedback - or visual aid
-		
-		//not sure if should be here or inside PointerController class
-//		if (onCalibration) {
-//			PointerController.cornerShape(id);
-//			PApplet p = PointerController.getParent();
-//			if ( p.keyPressed && p.key >= '1' && p.key <= '6' )  //<-- 6, designed for projMatrix, but now this is inside CORNER settings.
-//				updateCorner( p.key - '0',  new PVector(p.mouseX, p.mouseY) );
-//		}
+
+
 	}
 
 
@@ -150,122 +152,211 @@ public class PointerDevice extends PVector  {
 	public void setYasX ( boolean bool ){
 		this.setYasX = bool;
 	}
-	
+
 	public void setInvertX ( boolean bool ){
 		this.invertX = bool;
 	}
-	
+
 	public void setInvertY ( boolean bool ){
 		this.invertY = bool;
 	}
-	
+
+	public void setServoSpeed ( int servoSpeed ){
+		this.servoSpeed = servoSpeed;
+	}
+
 	//-------------------------------< GETTERS >-----------------------------------------------
-	
+
+	public float getServoSpeed() {
+		return servoSpeed;
+	}
+
+
 	public void printCorners(){
 		System.out.println("Pointer " + id + " corners:");
 		for (int i = 0; i < 4; i++) {
 			System.out.println( "["+i+"]: " + corner[i] );	
 		}
 	}
-	
+
 	public void printDefaultSquaredPlane(){
 		System.out.println("Pointer " + id + " defaultSquaredPlane:");
 		for (int i = 0; i < 4; i++) {
 			System.out.println( "["+i+"]: " + defaultSquaredPlane[i] );	
 		}
 	}
-	
-	
-	
-	 //---------------------------------- <    MOVE     >-------------------------------------
 
 
-	  void updateMove() {
-	    if ( this.dist(target) > targetDistTolerance ) {
 
-	      move();
+	//---------------------------------- <    MOVE     >-------------------------------------
 
-	      //TODO --->> below is to be done inside MOVE()
-	      
-	      if (enableHomography && !PointerController.onCalibration) {
-	        pfpos[0] = fpos[0];
-	        pfpos[1] = fpos[1];
-	        PVector tmp =  HomographyMatrix.solve((PVector)this, hMatrix) ;
-	        fpos[0] = tmp.x;
-	        fpos[1] = tmp.y;
-	      } else {
-	        pfpos[0] = ppos.x;
-	        pfpos[1] = ppos.y;
-	        fpos[0] = x;
-	        fpos[1] = y;
-	      }
-	      
-	      
-	        //pfpos[0] = ppos.x;
-	        //pfpos[1] = ppos.y;
-	        //fpos[0] = x;
-	        //fpos[1] = y;
+	protected void alignToTarget(){
+		onTarget = true;
+		this.set(target.x, target.y);
+	}
+
+	protected void removeTarget(){
+		targetList.remove(target);
+	}
+
+	protected void addTarget(PVector newTarget){
+		System.out.println("added to list, now: " + targetList.size());
+		targetList.add(0,newTarget);
+	}
+
+	protected void updateMove() {
+
+		if(!overTarget()){ //below can only happen when target and current position are not aligned
+
+			//pointer is on movement or on pre-movement (calculating new trajectory)
+
+			if(!onMovement){
+				//pre-movement, setting a new trajectory and start moving
+				calculateServoTrajectory();
+				setOnMovement(true);
+			}else{
+				//pointer has a trajectory to move and its moving.
+				if(!trajectoryPoints.isEmpty()){
+
+					PVector closerPosition = trajectoryPoints.get( trajectoryPoints.size() - 1 );
+					set( closerPosition.copy() );
+					System.out.println("Pointer "+ id +": moving closer: " + x + "," + y + "[" + trajectoryPoints.size() +" steps left]");
+
+					//temporary display for debug
+					PointerController.parent.stroke(0xffff0000);
+					PointerController.parent.strokeWeight(4);
+					PointerController.parent.point(x, y);
+
+				}else{
+					System.out.println("Pointer "+ id +": trajectoryPoints is empty, should be overTarget");
+					alignToTarget();
+				}
+			}
+		} else {
+
+			//temporary display for debug
+			PointerController.parent.stroke(-1);
+			PointerController.parent.strokeWeight(3);
+			PointerController.parent.point(x, y);
+
+			//goal
+			if(!overTarget()){
+				alignToTarget(); //align if not
+			}
+			setOnMovement(false); //dispatches actions for movementCompleted
+
+			//check if there are other targets to go stored on a list
+			if(!targetList.isEmpty()){
+				System.out.println("\n -->> checking stored target size: " + targetList.size());
+				target = targetList.get( targetList.size() - 1 );
+				targetList.remove(target);
+				System.out.println("removed targed from list. size: " + targetList.size());
+				System.out.println("onMovement:" + onMovement + ", overTarget():" + overTarget());
+			}
+		}
+	}
+
+	public void moveTo( PVector newTarget ){
+		moveTo(  newTarget, true );
+	}
+
+	public void moveTo( PVector newTarget , boolean useTransformations){ //TODO
+		System.out.println("Pointer "+ id +": moveTo " + newTarget);
+		if( allowRetargeting && onMovement ){
+			//terminate movement - so new trajectory can be calculated
+			setOnMovement(false);
+			alignToTarget();
+			//set new target;
+			target = newTarget.copy();
+		}else{
+			if(overTarget() ){ //testing statement
+				System.out.println("Pointer "+ id +": setting target");
+				target = newTarget.copy();
+			}else{
+				System.out.println("### adding new target while not over target");
+				//store movement on a list to execute after current movement is finished
+				addTarget(newTarget);
+			}
+		}
+	}
+
+	//	  void moveTo( float tx, float ty ) {
+	//	    /*this function sets a new target usually far from current position. If this is the case, move() function  will take place)*/
+	//	    //println("MOVING TO: ", tx, ty );
+	//	    if (allowRetargeting && moving) setMoving(false); //if allowRetargeting is true and target changes, trajectory will be recalculated and restarted
+	//	    target.set(tx, ty);
+	//
+	//	    //if an insctruction to move to is given but target and current position are the same, just say the moviment is finished:
+	//	    if ( this.dist(target) < targetDistTolerance ) {
+	//	     // println("NOT MOVING BECAUSE TOO CLOSE TO TARGET");
+	//	      setMoving(false);
+	//	    }
+	//	  }
+
+	boolean overTarget(){
+		//System.out.println("Pointer "+ id + ": overTarget ("+(target.dist(this) < targetDistTolerance)+"): " + this + ", " + target );
+		return target.dist(this) < targetDistTolerance;
+	}
+
+	boolean overTimer() {
+		return PointerController.parent.millis() > (moveStartTime + moveInterval);
+	}
+
+	void calculateServoTrajectory() {
 
 
-	      //grid experimental
-//	      if (enableGrid) {
-//	        PVector gridTransformed = toGrid (  fpos[0],fpos[1] );
-//	        fpos[0] =  gridTransformed.x;
-//	        fpos[1] =  gridTransformed.y;
-//	      }
-	      
-	      
-	    } else {
-//	      fill(#ff0000);
-//	      noStroke();
-//	      ellipse(200, 20, 10, 10);
-//	      fill(-1);
-//	      text("idle", 210, 20);
-	    }
-	  }
+		//happens once before movement starts
+		//creates a fragmented trajectory for servos
+
+		float travelX = Math.abs(target.x - x); //suppose 90º
+		float travelY = Math.abs(target.y - y); //suppose 180º;
+		int timeX = (int)(travelX * servoSpeed); //180ms
+		int timeY = (int)(travelY * servoSpeed); //360ms (if realSpeed = 2)
+
+		System.out.println("Pointer "+ id +" --> calculation starts for pointer "+ id +": " + PointerController.parent.millis());
+		System.out.println("going to "+ x + "," + y + " to " + target.x + "," + target.y);
+
+		moveInterval = PApplet.max(timeX, timeY); //picking up the slower one (360ms)
+		onTarget = false;
+
+		//##   instead of sending data to servo, we need to create a list of trajectory points fragmented from target
+		//##   and keep sending data to serial constantly
+
+		//how many servoupdates are necessairy to perform this trajectory?
+		trajectorySteps =  (int) Math.ceil ( moveInterval/PointerController.getServoUpdateRate() ); // we need to consider the rest of a division ( 18 )
 
 
-	  void moveTo( float tx, float ty ) {
-	    /*this function sets a new target usually far from current position. If this is the case, move() function  will take place)*/
-	    //println("MOVING TO: ", tx, ty );
-	    if (allowRetargeting && moving) setMoving(false); //if allowRetargeting is true and target changes, trajectory will be recalculated and restarted
-	    target.set(tx, ty);
+		//How about the function, vertical coordinate is nearest integer to (5/14 times horizontal coordinate) y = round(h/w* x)
 
-	    //if an insctruction to move to is given but target and current position are the same, just say the moviment is finished:
-	    if ( this.dist(target) < targetDistTolerance ) {
-	     // println("NOT MOVING BECAUSE TOO CLOSE TO TARGET");
-	      setMoving(false);
-	    }
-	  }
+		float xFragment =  travelX / trajectorySteps ;  // suppose 180/18 = 10
+		float yFragment =  travelY / trajectorySteps ;  // suppose 180/18 = 10
 
-	  float calculateServoTrajectoryTime( PVector ini, PVector end) {
-	    return Math.max( Math.abs(end.x - ini.x), Math.abs(end.y - ini.x)) * servoSpeed * 1000 ;
-	  }
+		//directions from current to target;
+		int signalX = (target.x >= x)? 1 : -1;
+		int signalY = (target.y >= y)? 1 : -1;
 
-	  float calculateTrajectoryTime() {
+		//initial position (current)
+		float init_x = x;
+		float init_y = y;
 
-	    //***************************** TODO
-	    moveStartTime = (int) PointerController.getParent().millis();                                                                      //initial time before movement starts
-	    //float[] fTarget;                                                      
-	    //if (enableHomography && !onCalibration) {
-	    //  PVector tmp =  HomographyMatrix.solve((PVector)this, hMatrix) ;
-	    //  ipos.set(tmp.x, tmp.y);
-	    //  tmp = HomographyMatrix.solve( (PVector)target, hMatrix );
-	    //  //fTarget = new float[]{tmp.x, tmp.y};
-	    //  target.set(tmp.x, tmp.y);
-	    //} else {
-	    //  ipos.set(x, y);
-	    //   //fTarget = new float[]{target.x, target.y};
-	    //}
-	    ipos.set(x, y); //initial position before movement starts
-	    trajectorySpanX = target.x-ipos.x ;                                                                     //time to travel in axis X
-	    trajectorySpanY = target.y-ipos.y ;                                                                     //time to travel in axis Y
-	   // println("ini:", ipos, "dx:", trajectorySpanX, "dy:", trajectorySpanY, "moveInterval:", moveInterval);
-	    return Math.max( Math.abs(trajectorySpanX), Math.abs(trajectorySpanY)) * servoSpeed / speed * 1000 ;           //choose longer time and convert to seconds ?
-	  }
+		for (int i = 0; i < trajectorySteps; i++) {
 
+			init_x = init_x + xFragment * signalX;
+			init_y =  init_y + yFragment * signalY;
+			trajectoryPoints.add( 0 ,new PVector(Math.round(init_x),Math.round(init_y),laser )); //note the order
+
+		}
+
+		System.out.println("Pointer "+ id +": trajectorySteps: " + trajectorySteps);
+
+		moveStartTime = PointerController.parent.millis();
+
+	}
+
+
+	/*
 	  void move() {
-	    /* the condition for this function to occur is if target is set far from current position */
+	    //the condition for this function to occur is if target is set far from current position 
 
 	    //if not moving, calculate trajectory first
 	    if (!moving) {
@@ -298,7 +389,7 @@ public class PointerDevice extends PVector  {
 
 	      // • using uniform movement
 	      else {
-	        Action releaseMotor = new Action( this, "setMotorBusy", false );
+	        Action releaseMotor = new Action( this, "setServoBusy", false );
 	        new Countdown( (int) servoT, releaseMotor ).start();
 	        set(  PVector.lerp(ipos, target, transition)  );                            // <--  THIS LINE SETS THE CURRENT POSITION TO THESE VALUES
 	      }
@@ -311,29 +402,23 @@ public class PointerDevice extends PVector  {
 	      }
 	    }
 	  }
+	 */
+
+
+	void setOnMovement(boolean b) {
+		if (!b && onMovement) Action.perform("moveCompleted"+id);
+		onMovement = b;
+	}
+
+
+	void onMoveComplete() {
+		System.out.println("Pointer "+ id + ": " + PointerController.parent.millis() + " move is completed");
+		if (!linesToDraw.isEmpty()) Action.perform( "line_P"+id ); //this action dispatches next line in a list if list is not empty
+	}
 
 
 
 
-	  void setMoving(boolean b) {
-	    moving = b;
-	    if (!b) Action.perform("moveCompleted"+id);
-	  }
-
-
-	  void setMotorBusy( boolean b ) {
-	    motorBusy = b;
-	    //if(!b) println(millis(), "motor released");
-	  }
-
-	  void onMoveComplete() {
-	    //println(millis(), "move is completed");
-//	    if (!linesToDraw.isEmpty()) Action.perform( "line_P"+id ); //this action dispatches next line in a list if list is not empty
-	  }
-
-
-	
-	
 
 	//---------------------------------- <    LASER     >-------------------------------------
 
@@ -349,7 +434,7 @@ public class PointerDevice extends PVector  {
 	void onLaserChange() {
 		plaser = laser;
 		System.out.println("LASER CHANGED "+ laser);
-//		if (!linesToDraw.isEmpty()) nextAction(); //this action dispatches next line in a list if list is not empty
+		//		if (!linesToDraw.isEmpty()) nextAction(); //this action dispatches next line in a list if list is not empty
 	}
 
 	//---------------------------------- <  NEXT ACTION IN LIST  >-------------------------------------
@@ -388,7 +473,7 @@ public class PointerDevice extends PVector  {
 
 
 	public void clearActionList(){
-//		linesToDraw.clear();
+		//		linesToDraw.clear();
 	}
 
 
@@ -423,22 +508,22 @@ public class PointerDevice extends PVector  {
 		PVector B = new PVector(Math.min( servoRangeX[1], Math.max(servoRangeX[0], corner[1].x)), Math.min( servoRangeY[1], Math.max(servoRangeY[0], corner[1].y)));
 		PVector C = new PVector(Math.min( servoRangeX[1], Math.max(servoRangeX[0], corner[2].x)), Math.min( servoRangeY[1], Math.max(servoRangeY[0], corner[2].y)));
 		PVector D = new PVector(Math.min( servoRangeX[1], Math.max(servoRangeX[0], corner[3].x)), Math.min( servoRangeY[1], Math.max(servoRangeY[0], corner[3].y)));
-		
+
 		System.out.println("cornerShape()");
 		System.out.println("A: " + A.x +", "+ A.y);
 		System.out.println("B: " + B.x +", "+ B.y);
 		System.out.println("C: " + C.x +", "+ C.y);
 		System.out.println("D: " + D.x +", "+ D.y);
-		
+
 		s.vertex(A.x, A.y);
 		s.vertex(B.x, B.y);
 		s.vertex(C.x, C.y);
 		s.vertex(D.x, D.y);
-		
+
 		s.endShape();
 		return s;
 	}
 
-	
+
 }
 
