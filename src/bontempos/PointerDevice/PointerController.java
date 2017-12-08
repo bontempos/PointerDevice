@@ -1,7 +1,13 @@
-/*
- * TODO every place using fromScreen - could be fromCanvas <-- make some automatic function to select among them.
- * 
+/**
+ * Pointer Devices main controller and serial communication class
+ *
+ * @author       Anderson Sudario
+ * @version      1.0
+ * 2017
  */
+
+//TODO every place using fromScreen - could be fromCanvas <-- make some automatic function to select among them.
+
 
 package bontempos.PointerDevice;
 
@@ -53,7 +59,7 @@ public  class PointerController {
 
 	private static Serial serial;
 	private String arduinoReply = null;
-	private static  int	 servoUpdateRate	  =	  20; 
+	private static  int	 servoUpdateRate	  =	  20;  //TODO replace by pointerUpdateRate (because it also updates laser gradient, not just servo)
 	Countdown servoUpdateTimer;
 
 	private int maxPointer = 4;
@@ -153,7 +159,9 @@ public  class PointerController {
 		forceHomographyOnCalibration = false;
 		act = new Act(parent);
 		serialInit(baudRate);
-		servoUpdateTimer = new Countdown(servoUpdateRate, new Action( this, "executeServosTrajectories")); 
+		Action servoUpdateAuto = new Action( this, "executeServosTrajectories");
+		servoUpdateAuto.setEcho(false);
+		servoUpdateTimer = new Countdown(servoUpdateRate,servoUpdateAuto); 
 		servoUpdateTimer.setRepeat(true);
 		servoUpdateTimer.start();
 		//servoUpdateChecker.setPermanent(true);
@@ -203,7 +211,7 @@ public  class PointerController {
 		return (parent.mouseX != parent.pmouseX || parent.mouseY != parent.pmouseY);
 	}
 
-	private boolean usingCanvas(){
+	private static boolean usingCanvas(){
 		return (canvasSize[0] > 0 && canvasSize[1] > 0);
 	}
 
@@ -283,7 +291,7 @@ public  class PointerController {
 		//update 1 step including all pointers
 
 		PVector packagePositions[] = new PVector[activePointers()];
-		byte packageLasers[] = new byte[activePointers()];
+		float packageLasers[] = new float[activePointers()];
 		
 		//if all pointers are idle, return, so no need to send anything to serial;
 		boolean idle = true;
@@ -304,16 +312,16 @@ public  class PointerController {
 			//homography plane has its corners restricted to servo coord.
 
 			if(!p.trajectoryPoints.isEmpty()){
-				System.out.println("there is something to execute for pointer " + p.id);
+				//System.out.println("there is something to execute for pointer " + p.id);
 				packagePositions[k] = p.trajectoryPoints.get( p.trajectoryPoints.size() - 1 ) ; //last trajectory position (closer to current position)
 				packageLasers[k] = (byte)packagePositions[k].z;
 				//remove transfered trajectory from list
 				p.trajectoryPoints.remove( p.trajectoryPoints.size() - 1 ); //last
-				System.out.println("Pointer "+p.id+": trajectory points size: " + p.trajectoryPoints.size() );
+				//System.out.println("Pointer "+p.id+": trajectory points size: " + p.trajectoryPoints.size() );
 			}else{
 				//retransmitting last position and laser status
 				//if pointer trajectory is set as uncompleted, change to completed;
-				System.out.println("retransmitting position for pointer " + p.id);
+				//System.out.println("retransmitting position for pointer " + p.id);
 				
 				packagePositions[k] = new PVector(p.target.x, p.target.y); 
 				packageLasers[k] = p.laser;
@@ -391,7 +399,7 @@ public  class PointerController {
 	//##############################################  SERIAL  ##################################################
 
 	public void serialInit(int baudRate) {
-		System.out.println("serialInit");
+		//System.out.println("serialInit");
 		serial = new Serial(parent, Serial.list()[1], baudRate );
 	}
 
@@ -405,7 +413,7 @@ public  class PointerController {
 	}
 
 	//setting ONLY LASER and keeping position
-	public void update( byte[] lasers ){
+	public void update( float[] lasers ){
 		PVector positions[] = new PVector[activePointers()];
 		//for (int i = 0; i < activePointers(); i++) {
 		for (int i = 0; i < pointers.size(); i++) {
@@ -422,7 +430,7 @@ public  class PointerController {
 
 	//setting ONLY positions (mouse coord system) and keeping laser status
 	public void update( PVector[] positions){
-		byte lasers[] = new byte[activePointers()];
+		float lasers[] = new float[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			lasers[i] = pointers.get(i).laser;
 		}
@@ -430,11 +438,14 @@ public  class PointerController {
 	}
 
 	//setting BOTH positions and laser status [multi]
-	public void update( PVector[] positions, byte[] lasers){
+	public void update( PVector[] positions, float[] lasers){
 		update( positions, lasers, true);
 	}
 
-	public void update( PVector[] positions, byte[] lasers, boolean useTransformations){
+	public void update( PVector[] positions, float[] lasers, boolean useTransformations){
+		
+		//main method. all update methods ends here.
+		//this creates a package of contents to move all pointers in a very single moment and sends it to serial.
 
 		byte serialPackage[] = {0};
 		int  bytePos = 0;
@@ -453,7 +464,7 @@ public  class PointerController {
 					serialPackage[bytePos++] = (byte)byteSize;
 				}
 				
-				p.laser  = lasers[i];
+				p.setLaser(lasers[i]);
 				serialPackage[bytePos++] = (byte)i;
 				serialPackage[bytePos++] = p.laser;
 				
@@ -462,19 +473,20 @@ public  class PointerController {
 				float _x = positions[i].x;
 				float _y = positions[i].y;
 
-				if (useTransformations) {
-					pointerTrasformations(  p, _x, _y );
+				if (useTransformations) { //TODO check calibration again
+					//pointerTrasformations(  p, _x, _y );
+					p.target = pointerTrasformations(  p, _x, _y );
 					serialPackage[bytePos++] = (byte) servoLimit(p.target.x); //toTarget
 					serialPackage[bytePos++] = (byte) servoLimit(p.target.y); //toTarget
 				}else{
-					System.out.println("_x: "+ _x +" , _y:" + _y);
+					//System.out.println("_x: "+ _x +" , _y:" + _y);
 					serialPackage[bytePos++] = (byte)_x; //toTarget
 					serialPackage[bytePos++] = (byte)_y; //toTarget
 				}
 
 				//update previous status
-				p.plaser = p.laser;
-				p.ppos = p.copy();
+				//p.plaser = p.laser; //done in p.onLaserChange
+				//p.ppos = p.copy(); //done in p.onMoveComplete
 			}
 		}
 		sendCommands(serialPackage);
@@ -483,8 +495,8 @@ public  class PointerController {
 	//setting specific Pointer
 	//avoid using this in a loop inside processing. Instead, send array of values to function above.
 	//position comes in mouse coord system
-	public void update( PVector position, byte laser, int pointerId){
-		byte lasers[] = new byte[activePointers()];
+	public void update( PVector position, float laser, int pointerId){
+		float lasers[] = new float[activePointers()];
 		PVector positions[] = new PVector[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			PointerDevice p = pointers.get(i);
@@ -492,8 +504,9 @@ public  class PointerController {
 			if(p.id == pointerId){
 				//inserting new data on specific pointer ( position is in screen coord system converting to servo coord)
 				//System.out.println("Pointer "+ i +": new position:" + p.x + ", " + p.y);
-				pointerTrasformations( pointers.get(pointerId) , position.x, position.y ); //transforming pointer instance position directly 
-				p.laser = laser;
+				p.target = pointerTrasformations(  pointers.get(pointerId), position.x, position.y );
+				//pointerTrasformations( pointers.get(pointerId) , position.x, position.y ); //transforming pointer instance position directly 
+				p.setLaser (laser);
 			}
 
 			//just retransmitting current data from all pointers (expects servo coord system)
@@ -508,7 +521,7 @@ public  class PointerController {
 
 	public void update(){
 		//used for test - with same mouse input for all Pointers
-		byte lasers[] = new byte[activePointers()];
+		float lasers[] = new float[activePointers()];
 		PVector positions[] = new PVector[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			positions[i].set(parent.mouseX,parent.mouseY);
@@ -519,13 +532,9 @@ public  class PointerController {
 	}
 
 	protected void sendCommands(byte[] serialPackage){
-		
-		
 		for(int i = 0; i < serialPackage.length; i++){
-			//before sending data to serial - verify if servo on specific pointer is busy
-			//(index, laser, servo1, servo2)
+			//(first byte is the byteSize, than for each pointer: index, laser, servoX, servoY)
 			//System.out.println("------>> serial package:" + serialPackage[i]);
-			
 			serial.write(serialPackage[i]);
 		}
 		sentCommands++ ;	
@@ -550,7 +559,7 @@ public  class PointerController {
 
 	//toggle selected laser
 	public void toggleLaser(){ //TODO laser is turnig off
-		byte lasers[] = new byte[pointers.size()];
+		float lasers[] = new float[pointers.size()];
 
 		//if(selectedPointer != null) selectedPointer = pointers.get(0);
 
@@ -558,13 +567,13 @@ public  class PointerController {
 
 		for(int i = 0; i < pointers.size(); i++){
 			if(pointers.get(i).id == pid){
-				System.out.println("Pointer "+ pid +"  laser is:" + pointers.get(pid).laser);
+				//System.out.println("Pointer "+ pid +"  laser is:" + pointers.get(pid).laser);
 				if( pointers.get(pid).laser == 0){
-					lasers[ pid ] = (byte)1;
-					System.out.println("Pointer "+ pid +": laser on");
+					lasers[ pid ] = 1;
+					//System.out.println("Pointer "+ pid +": laser on");
 				}else{
-					lasers[ pid ] = (byte)0;
-					System.out.println("Pointer "+ pid +": laser off");
+					lasers[ pid ] = 0;
+					//System.out.println("Pointer "+ pid +": laser off");
 				}
 				//lasers[ pid ] = (pointers.get(pid).laser != (byte)0)?(byte)0:(byte)1;
 			}else{
@@ -572,7 +581,7 @@ public  class PointerController {
 			}
 		}
 		for(int i = 0; i < pointers.size(); i++){
-			System.out.println( "lasers["+i+"]: "+lasers[i] );
+			//System.out.println( "lasers["+i+"]: "+lasers[i] );
 		}
 		update( lasers );
 
@@ -627,31 +636,33 @@ public  class PointerController {
 
 	//this function modifies the pointer coord pvector directly
 	//incoming should be mouse/screen/canvas coord system
-	public void pointerTrasformations(PointerDevice p, float _x, float _y){
+	public static PVector pointerTrasformations(PointerDevice p, float _x, float _y){
 
 		double [][] matrix = p.hMatrix;
-
+		PVector transformed = new PVector();
 		//change x and y
-		p.target.x = (p.setYasX)? _y : _x;  //toTarget	
-		p.target.y = (p.setYasX)? _x : _y;	 //toTarget
+		transformed.x = (p.setYasX)? _y : _x;  //toTarget	
+		transformed.y = (p.setYasX)? _x : _y;	 //toTarget
 
 		//System.out.println("in_p:" + p.x + ";" + p.y);
 
 		//invert x or y (flip)
-		if(p.invertX) p.target.x = flipX(p.target.x); //toTarget
-		if(p.invertY) p.target.y = flipY(p.target.y); //toTarget
+		if(p.invertX) transformed.x = flipX(transformed.x); //toTarget
+		if(p.invertY) transformed.y = flipY(transformed.y); //toTarget
 
 		//homographic plane
 		if(p.enableHomography || forceHomographyOnCalibration){
 			//PVector h = toHomography(new PVector(p.x, p.y), i);
-			PVector h = toHomography(new PVector(p.target.x, p.target.y),matrix); //toTarget
-			p.target.set(h);  //toTarget
+			PVector h = toHomography(transformed,matrix); //toTarget
+			transformed.set(h);  //toTarget
 		}else{
 			//if(i == 0) System.out.println("in _y:" + _y);
-			p.target.x = toServos(fromScreen( p.target)).x;  //no need to use copy() because toServo breaks pvector instance. //toTarget
-			p.target.y = toServos(fromScreen( p.target)).y; //toTarget
+			p.target.x = toServos(fromScreen( transformed)).x;  //no need to use copy() because toServo breaks pvector instance. //toTarget
+			p.target.y = toServos(fromScreen( transformed)).y; //toTarget
 			//if(i == 0) System.out.println("out _y:" + _y);
 		}
+		
+		return transformed;
 	}
 
 
@@ -687,7 +698,7 @@ public  class PointerController {
 		return  new PVector( x, y );
 	}
 
-	public PVector toHomography(PVector in, double[][] hMatrix) {
+	public static PVector toHomography(PVector in, double[][] hMatrix) {
 		//System.out.println("toHomography input:" +  in.x + "," + in.y);
 		return HomographyMatrix.solve(in, hMatrix);
 	}
@@ -722,7 +733,7 @@ public  class PointerController {
 		return  fromCanvas( in, 0 );
 	}
 
-	public float flipX(float _x){
+	public static float flipX(float _x){
 		if(usingCanvas()){
 			return PApplet.map(_x, 0f,canvasSize[0],canvasSize[0],0f);
 		}else{
@@ -730,7 +741,7 @@ public  class PointerController {
 		}
 	}
 
-	public float flipY(float _y){
+	public static float flipY(float _y){
 		if(usingCanvas()){
 			return PApplet.map(_y, 0f,canvasSize[1],canvasSize[1],0f);
 		}else{
@@ -862,7 +873,7 @@ public  class PointerController {
 							pointer.corner[i] = new PVector();
 							pointer.corner[i].x = Float.parseFloat( pieces[k].split(" ")[2] );
 							pointer.corner[i].y = Float.parseFloat( pieces[k].split(" ")[3] );
-							System.out.println("load corner " + i + ": " + pointer.corner[i].x + ", " + pointer.corner[i].y);
+							//System.out.println("load corner " + i + ": " + pointer.corner[i].x + ", " + pointer.corner[i].y);
 							k++;
 						}
 

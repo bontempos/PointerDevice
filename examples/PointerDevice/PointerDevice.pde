@@ -4,7 +4,7 @@ import bontempos.ProjectionMatrix.*;
 import processing.serial.*;
 
 
-int POINTERS = 4;
+int POINTERS = 2;
 PointerController pc;
 ArrayList<PVector> strokes;  
 
@@ -19,11 +19,15 @@ void setup() {
   size(400, 400, P2D);
   pc = new PointerController(this, 38400);
   pc.addPointer(POINTERS);
+ 
+  
+  println(" servoRate : ",  pc.getServoUpdateRate() );
   strokes = new ArrayList<PVector>();
 
   for(int i = 0; i < POINTERS;i++){
     PointerDevice p = pc.getPointer(i);
     p.setInvertY (true);
+    //p.setServoSpeed(10); //motor speed
   }
 }
 /*
@@ -43,6 +47,11 @@ Pointer 0:
 
 void draw() {
   background(0);
+  
+  for(int i = 0; i < pc.pointers.get(0).actionList.size(); i++){
+    String s = pc.pointers.get(0).actionList.getArrayList().get(i);
+    text( s , 10, 200 + i * 20);
+  }
 
 
   if (finished ) {
@@ -94,6 +103,27 @@ void keyTyped() {
       finished = false;
     }
   }
+  else if (keyPressed && key == 't'){
+    println("--------------------------");
+    PointerDevice p = pc.pointers.get(0);
+    //p.moveTo( new PVector(int(random(180)),int(random(180))) );
+    //p.moveTo( new PVector(150,100) , false);
+    p.moveTo( new PVector(120,180));
+  }
+  else if (keyPressed && key == 'r'){
+    PointerDevice p = pc.pointers.get(0);
+    p.moveTo( new PVector(90,90));
+  }
+  else if (keyPressed && key == 'y'){
+    println("--------------------------");
+    PointerDevice p = pc.pointers.get(0);
+    p.moveTo( new PVector(0,0));
+    p.wait(1000); 
+    p.moveTo( new PVector(180,0));
+    p.moveTo( new PVector(180,180));
+    p.moveTo( new PVector(0,180));
+    p.moveTo( new PVector(0,0));
+  }
 }
 
 
@@ -135,6 +165,7 @@ void drawLaser() {
     finished = true;
   }
 }
+
 
 void renderStrokes() {
   for (int i = 0; i < strokes.size(); i++) {
