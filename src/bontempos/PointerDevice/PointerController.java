@@ -29,8 +29,11 @@ import processing.core.PApplet;
 import processing.core.PConstants;
 import processing.core.PShape;
 import processing.core.PVector;
+import processing.data.JSONArray;
+import processing.data.JSONObject;
 import processing.event.KeyEvent;
 import processing.serial.Serial;
+
 
 //what about extending this from a ArrayList ? so instead of pc.pointers.get(0), we use just pc.get(0);
 
@@ -778,8 +781,35 @@ public  class PointerController {
 	
 	//##############################################  JSON PARSER  ##################################################
 	
+	public Action[] getHersheyActions(char c){
+		return getHersheyActions(c - 0x0);
+	}
 	
-	public Action[] hersheyChar(int ascii){
+	public Action[] getHersheyActions(int ascii){
+		int CONST = 33; //offset from ascii
+		
+		//JSONParser parser = new JSONParser();		
+		//JSONObject obj = (JSONObject) parser.parse(new FileReader("hershey.json"));
+		
+		//String test = (String) obj.get("ascii");
+		
+		//int[] a = simplex[ c - CONST ] ;  //get character from the list
+		//  int charWidth = a[1];
+		//  int [] last = {a[2], a[3]}; //initializes with first position
+		
+		JSONObject obj = null;
+		try {
+			obj = new JSONObject( new FileReader("hershey.json") );
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		String pageName = obj.getJSONObject("pageInfo").getString("simplex");
+
+		JSONArray arr = obj.getJSONArray("posts");
+		
+		
+		
 		//TODO
 		Action set[] = new Action[1];
 		
