@@ -148,9 +148,20 @@ public  class PointerController {
 
 
 	//##############################################  CONTROLLER INIT  ##################################################
-
-
+	
+	public PointerController(PApplet parent) {
+		initialize(parent, Serial.list()[1], 9600) ;
+	}
+	
 	public PointerController(PApplet parent, int baudRate) {
+		initialize(parent, Serial.list()[1], baudRate) ;
+	}
+	
+	public PointerController(PApplet parent, String serialAddress, int baudRate) {
+		initialize(parent, serialAddress, baudRate);
+	}
+
+	private void initialize(PApplet parent, String serialAddress, int baudRate){
 		PointerController.parent = parent;
 		PointerController.baudRate = baudRate;
 		setScreenSize(parent.width, parent.height); //default
@@ -158,16 +169,14 @@ public  class PointerController {
 		parent.registerMethod("keyEvent", this);
 		forceHomographyOnCalibration = false;
 		act = new Act(parent);
-		serialInit(baudRate);
+		serialInit(serialAddress, baudRate);
 		Action servoUpdateAuto = new Action( this, "executeServosTrajectories");
 		servoUpdateAuto.setEcho(false);
 		servoUpdateTimer = new Countdown(servoUpdateRate,servoUpdateAuto); 
 		servoUpdateTimer.setRepeat(true);
 		servoUpdateTimer.start();
 		//servoUpdateChecker.setPermanent(true);
-
 	}
-
 
 	public static PointerController get() {
 		if (instance == null) {
@@ -398,9 +407,14 @@ public  class PointerController {
 
 	//##############################################  SERIAL  ##################################################
 
-	public void serialInit(int baudRate) {
+//	public void serialInit(int baudRate) {
+//		//System.out.println("serialInit");
+//		serial = new Serial(parent, Serial.list()[1], baudRate );
+//	}
+	
+	public void serialInit(String serialAddress, int baudRate) {
 		//System.out.println("serialInit");
-		serial = new Serial(parent, Serial.list()[1], baudRate );
+		serial = new Serial(parent, serialAddress, baudRate );
 	}
 
 	void serialRead() {
@@ -760,6 +774,22 @@ public  class PointerController {
 	//  float y = map( out.y, rangeY[0], rangeY[1], 0, height );
 	//  return new PVector(x, y);
 	//}
+	
+	
+	//##############################################  JSON PARSER  ##################################################
+	
+	
+	public Action[] hersheyChar(int ascii){
+		//TODO
+		Action set[] = new Action[1];
+		
+		return set; 
+	}
+	
+	
+	
+	
+	
 
 	//############################################# POINTERS CONFIG SAVE LOAD DATA  #######################################
 
