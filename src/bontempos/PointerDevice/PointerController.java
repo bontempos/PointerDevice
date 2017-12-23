@@ -69,8 +69,11 @@ public  class PointerController {
 	private boolean useMaxPointerLimit = true; 			//if true, will ignore file readings
 	private PrintWriter config;							//txt file with calibration data
 	private BufferedReader reader;
-
-
+	private static int maxLaserBrightness;
+	
+	public static boolean charCenterAlign = false; //	if true each poitner will draw a characeter considering its distance from center origin (90,90)
+	public static PVector promptPosition = new PVector();
+	public static float charSize = 10f;
 	//############################################# < RESERVED KEYS ON CALIBRATION > ##################################################
 
 	public char CALIBRTION_MODE_KEY = 	'c';				//toggles calibration mode when pressed
@@ -82,6 +85,9 @@ public  class PointerController {
 	public char DRAW_FRAME	=			'F';
 	//numbers from 1 to 6 for each of calibration vertices
 	//LEFT and RIGHT to move among selected Pointers
+	
+	protected static  PointerCanvas canvas;
+
 
 	//############################################# < GETTERS > ##################################################
 
@@ -113,9 +119,13 @@ public  class PointerController {
 		return servoUpdateRate;
 	}
 
-	
+
 	public boolean isOnCalibration(){
 		return onCalibration;
+	}
+
+	public static int getMaxLaserBrightness(){
+		return maxLaserBrightness;
 	}
 
 	//############################################# < SETTERS > ##################################################
@@ -149,17 +159,21 @@ public  class PointerController {
 		canvasPosition[1] = y;
 	}
 
+	public void setMaxLaserBrightness( int maxLaserBrightness ){
+		this.maxLaserBrightness = maxLaserBrightness;
+	}
+
 
 	//##############################################  CONTROLLER INIT  ##################################################
-	
+
 	public PointerController(PApplet parent) {
 		initialize(parent, Serial.list()[1], 9600) ;
 	}
-	
+
 	public PointerController(PApplet parent, int baudRate) {
 		initialize(parent, Serial.list()[1], baudRate) ;
 	}
-	
+
 	public PointerController(PApplet parent, String serialAddress, int baudRate) {
 		initialize(parent, serialAddress, baudRate);
 	}
@@ -170,6 +184,7 @@ public  class PointerController {
 		setScreenSize(parent.width, parent.height); //default
 		parent.registerMethod("draw", this);
 		parent.registerMethod("keyEvent", this);
+		canvas = new PointerCanvas(parent);
 		forceHomographyOnCalibration = false;
 		act = new Act(parent);
 		serialInit(serialAddress, baudRate);
@@ -264,7 +279,7 @@ public  class PointerController {
 
 						if(selectedPointer.invertY) mouse.y = flipY(mouse.y);
 
-						update( mouse, (byte)1, pid);
+						update( mouse, selectedPointer.laserMaxBrightness, pid);
 					}
 				}
 			}
@@ -275,11 +290,11 @@ public  class PointerController {
 				//after releasing key 1 to 6, after calibration, turns laser off
 				if(laserOnCalibration){
 					laserOnCalibration = false;
-					update(new PVector(parent.mouseX, parent.mouseY), (byte)0, pid);
+					update(new PVector(parent.mouseX, parent.mouseY), 0, pid);
 				}
 
 
-				byte laserState = selectedPointer.laser;
+				int laserState = selectedPointer.laser;
 				if( moveMove() ){
 					laserOnCalibration = false;
 					update(new PVector(parent.mouseX, parent.mouseY), laserState, pid);
@@ -293,9 +308,9 @@ public  class PointerController {
 
 	}
 
-//	public void blibli(){
-//		System.out.println("blibli:" + parent.millis());
-//	}
+	//	public void blibli(){
+	//		System.out.println("blibli:" + parent.millis());
+	//	}
 
 	public void executeServosTrajectories(){
 		//will execute update for all pointers if their trajectory arraylists have any trajectory fragment to perform.
@@ -303,8 +318,8 @@ public  class PointerController {
 		//update 1 step including all pointers
 
 		PVector packagePositions[] = new PVector[activePointers()];
-		float packageLasers[] = new float[activePointers()];
-		
+		int packageLasers[] = new int[activePointers()];
+
 		//if all pointers are idle, return, so no need to send anything to serial;
 		boolean idle = true;
 		for (int k = 0; k < activePointers(); k++) {
@@ -315,7 +330,7 @@ public  class PointerController {
 			}
 		}
 		if(idle) return;
-		
+
 
 		//creating package of positions and laser for all pointers within ONE trajectory step
 		for (int k = 0; k < activePointers(); k++) {
@@ -326,7 +341,9 @@ public  class PointerController {
 			if(!p.trajectoryPoints.isEmpty()){
 				//System.out.println("there is something to execute for pointer " + p.id);
 				packagePositions[k] = p.trajectoryPoints.get( p.trajectoryPoints.size() - 1 ) ; //last trajectory position (closer to current position)
-				packageLasers[k] = (byte)packagePositions[k].z;
+				//packageLasers[k] = packagePositions[k].z;  //<-- TODO this is because it could be possible to add gradient on each segment.
+				packageLasers[k] = p.laser; //but for now, getting the current laser.
+				
 				//remove transfered trajectory from list
 				p.trajectoryPoints.remove( p.trajectoryPoints.size() - 1 ); //last
 				//System.out.println("Pointer "+p.id+": trajectory points size: " + p.trajectoryPoints.size() );
@@ -334,14 +351,14 @@ public  class PointerController {
 				//retransmitting last position and laser status
 				//if pointer trajectory is set as uncompleted, change to completed;
 				//System.out.println("retransmitting position for pointer " + p.id);
-				
+
 				packagePositions[k] = new PVector(p.target.x, p.target.y); 
 				packageLasers[k] = p.laser;
 			}
 		}
 
 		update( packagePositions, packageLasers, false); //default (true) using transformations
-		
+
 	}
 
 	//##############################################  DISPLAY  ##################################################
@@ -410,11 +427,11 @@ public  class PointerController {
 
 	//##############################################  SERIAL  ##################################################
 
-//	public void serialInit(int baudRate) {
-//		//System.out.println("serialInit");
-//		serial = new Serial(parent, Serial.list()[1], baudRate );
-//	}
-	
+	//	public void serialInit(int baudRate) {
+	//		//System.out.println("serialInit");
+	//		serial = new Serial(parent, Serial.list()[1], baudRate );
+	//	}
+
 	public void serialInit(String serialAddress, int baudRate) {
 		//System.out.println("serialInit");
 		serial = new Serial(parent, serialAddress, baudRate );
@@ -430,7 +447,7 @@ public  class PointerController {
 	}
 
 	//setting ONLY LASER and keeping position
-	public void update( float[] lasers ){
+	public void update( int[] lasers ){
 		PVector positions[] = new PVector[activePointers()];
 		//for (int i = 0; i < activePointers(); i++) {
 		for (int i = 0; i < pointers.size(); i++) {
@@ -447,7 +464,7 @@ public  class PointerController {
 
 	//setting ONLY positions (mouse coord system) and keeping laser status
 	public void update( PVector[] positions){
-		float lasers[] = new float[activePointers()];
+		int lasers[] = new int[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			lasers[i] = pointers.get(i).laser;
 		}
@@ -455,12 +472,12 @@ public  class PointerController {
 	}
 
 	//setting BOTH positions and laser status [multi]
-	public void update( PVector[] positions, float[] lasers){
+	public void update( PVector[] positions, int[] lasers){
 		update( positions, lasers, true);
 	}
 
-	public void update( PVector[] positions, float[] lasers, boolean useTransformations){
-		
+	public void update( PVector[] positions, int[] lasers, boolean useTransformations){
+
 		//main method. all update methods ends here.
 		//this creates a package of contents to move all pointers in a very single moment and sends it to serial.
 
@@ -480,12 +497,12 @@ public  class PointerController {
 					serialPackage = new byte[byteSize + 1];
 					serialPackage[bytePos++] = (byte)byteSize;
 				}
-				
+
 				p.setLaser(lasers[i]);
 				serialPackage[bytePos++] = (byte)i;
-				serialPackage[bytePos++] = p.laser;
-				
-				
+				serialPackage[bytePos++] = (byte)p.laser;
+
+
 				//pure position from mouse coord system
 				float _x = positions[i].x;
 				float _y = positions[i].y;
@@ -512,8 +529,8 @@ public  class PointerController {
 	//setting specific Pointer
 	//avoid using this in a loop inside processing. Instead, send array of values to function above.
 	//position comes in mouse coord system
-	public void update( PVector position, float laser, int pointerId){
-		float lasers[] = new float[activePointers()];
+	public void update( PVector position, int laser, int pointerId){
+		int lasers[] = new int[activePointers()];
 		PVector positions[] = new PVector[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			PointerDevice p = pointers.get(i);
@@ -538,7 +555,7 @@ public  class PointerController {
 
 	public void update(){
 		//used for test - with same mouse input for all Pointers
-		float lasers[] = new float[activePointers()];
+		int lasers[] = new int[activePointers()];
 		PVector positions[] = new PVector[activePointers()];
 		for (int i = 0; i < activePointers(); i++) {
 			positions[i].set(parent.mouseX,parent.mouseY);
@@ -576,7 +593,7 @@ public  class PointerController {
 
 	//toggle selected laser
 	public void toggleLaser(){ //TODO laser is turnig off
-		float lasers[] = new float[pointers.size()];
+		int lasers[] = new int[pointers.size()];
 
 		//if(selectedPointer != null) selectedPointer = pointers.get(0);
 
@@ -678,7 +695,7 @@ public  class PointerController {
 			p.target.y = toServos(fromScreen( transformed)).y; //toTarget
 			//if(i == 0) System.out.println("out _y:" + _y);
 		}
-		
+
 		return transformed;
 	}
 
@@ -779,47 +796,39 @@ public  class PointerController {
 	//}
 	
 	
+
+
 	//##############################################  JSON PARSER  ##################################################
-	
-	public Action[] getHersheyActions(char c){
-		return getHersheyActions(c - 0x0);
+
+	public static int[] getHersheyCode(char c){
+		return getHersheyCode(c - 0x0);
 	}
-	
-	public Action[] getHersheyActions(int ascii){
-		int CONST = 33; //offset from ascii
+
+	public static int[] getHersheyCode(int ascii){
 		
-		//JSONParser parser = new JSONParser();		
-		//JSONObject obj = (JSONObject) parser.parse(new FileReader("hershey.json"));
+		selectedPointer = pointers.get(0);
+		int CONST = 33; //offset from ascii -> simplex[ c - CONST ]
 		
-		//String test = (String) obj.get("ascii");
-		
-		//int[] a = simplex[ c - CONST ] ;  //get character from the list
-		//  int charWidth = a[1];
-		//  int [] last = {a[2], a[3]}; //initializes with first position
-		
-		JSONObject obj = null;
+		JSONObject hershey = null;
+
 		try {
-			obj = new JSONObject( new FileReader("hershey.json") );
+			//TODO relative path
+			hershey = new JSONObject( new FileReader(System.getProperty("user.dir") + "/git/PointerDevice/src/bontempos/PointerDevice/hershey.json") );
 		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-		String pageName = obj.getJSONObject("pageInfo").getString("simplex");
 
-		JSONArray arr = obj.getJSONArray("posts");
-		
-		
-		
-		//TODO
-		Action set[] = new Action[1];
-		
-		return set; 
+		JSONObject simplex = hershey.getJSONObject("simplex");
+		return  simplex.getJSONArray( String.valueOf(ascii) ).getIntArray();
+
 	}
-	
-	
-	
-	
-	
+
+
+//	int[] centralized(){
+//		return new int[2];
+//	}
+
+
 
 	//############################################# POINTERS CONFIG SAVE LOAD DATA  #######################################
 

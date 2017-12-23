@@ -21,10 +21,14 @@ import processing.core.PShape;
 import processing.core.PVector;
 
 
+/*
+ *  TODO - > moveTo will include laser parameter as optional - thnik about how to add laser of actions to list or not
+ */
+
 public class PointerDevice extends PVector  {
 
 
-	public final int     laserMaxBrightness   =   255;
+	public final int laserMaxBrightness 	  =   255;	// 		0xFF; 	//(byte) 255;  // int i = laser & 0xff;
 	public final float[] servoRangeX          =   {0f, 180f}; 
 	public final float[] servoRangeY          =   {0f, 180f};
 	public final float   targetDistTolerance  =   1f;        //detects when servos needs to start moving
@@ -35,9 +39,11 @@ public class PointerDevice extends PVector  {
 
 	//LASER
 	public int id;
-	public byte laser, plaser;
+	public int laser, plaser;
 	public boolean allowLaserGradient  =   false;					//fragments laser intensity (if different values) while moving btw different positions
-
+	public boolean canDraw			   =   true;					//
+	public boolean useLines			   =   true;					//draws connecting current and previous position
+	
 	//MOVEMENT
 	boolean onMovement				   =   false;
 	float speed                        =   1f;        				//increment mult for speed
@@ -142,13 +148,16 @@ public class PointerDevice extends PVector  {
 	public void draw() {
 		if(active){
 			update();
+			//if(canDraw) drawOnCanvas(); //check inside updateMove()
 		}
 	}
 
 
 	void update(){
+		//what if we do it here?
+		ppos = new PVector(x,y); 
 		updateMove(); //if target is different of current position
-
+		if(canDraw) drawOnCanvas();
 		//return feedback - or visual aid
 
 
@@ -204,6 +213,10 @@ public class PointerDevice extends PVector  {
 		}
 	}
 
+	public int getLaser(){
+		return laser;
+	}
+	
 	//---------------------------------- <    ACTIONS     >-------------------------------------
 
 	// moveTo( target ), moveTo( target, laser ), laserOn(), laserOff(), wait()
@@ -229,10 +242,10 @@ public class PointerDevice extends PVector  {
 		target = newTarget.copy();
 	}
 
-	public void setTargetDraw(PVector newTarget, float laser){
+	public void setTargetDraw(PVector newTarget, float laserIntensity){
 		
 		target = newTarget.copy();
-		setLaser(laser);
+		setLaser(laserIntensity);
 		
 		//this function would only call next action if moveComplete action happens.
 		//that is not possible if target == current position (meaning only a laser change).
@@ -244,6 +257,8 @@ public class PointerDevice extends PVector  {
 	}
 
 	protected void updateMove() {
+		
+
 
 		if(!overTarget()){ //below can only happen when target and current position are not aligned
 
@@ -271,6 +286,7 @@ public class PointerDevice extends PVector  {
 					PointerController.parent.stroke(0xffff0000);
 					PointerController.parent.strokeWeight(4);
 					PointerController.parent.point(x, y);
+					
 
 				}else{
 
@@ -281,7 +297,7 @@ public class PointerDevice extends PVector  {
 			}
 		} else {
 
-			//temporary display for debug
+			//temporary display for debug (stopped cursor)
 			PointerController.parent.stroke(-1);
 			PointerController.parent.strokeWeight(3);
 			PointerController.parent.point(x, y);
@@ -473,11 +489,25 @@ public class PointerDevice extends PVector  {
 
 
 	//---------------------------------- <    LASER     >-------------------------------------
-
+	
+	//TODO - prefix names with "ACT" for programmable actions
+	public void actLaserOff(){
+				addAction( new Action("LaserOff", this, "setLaserNextAction", 0) );
+	}
+	
+	public void actLaserOn(){
+		addAction( new Action("LaserOff", this, "setLaserNextAction", PointerController.getMaxLaserBrightness()) );
+	}
+	
+	public void setLaserNextAction(float value){
+		setLaser(value);
+		nextAction();
+	}
 
 	public void setLaser(float value) {
 		if(echo) System.out.println("Laser: " + value);
-		laser = (byte)value;
+		laser = (int)value;
+		
 		Action.perform("laserChange"+id);
 	}
 
@@ -486,6 +516,10 @@ public class PointerDevice extends PVector  {
 		if(laser != plaser){
 			plaser = laser;
 			System.out.println("LASER CHANGED "+ laser);
+			
+			int c = (laser==0f)?0x55ff9999:0x555555ff;
+			PointerController.canvas.drawPoint( new PVector(x,y),c);
+			
 			//nextAction(); //when used with moveToDraw, it was calling next call twice, and performing 2 actions at same time
 		}
 	}
@@ -510,7 +544,100 @@ public class PointerDevice extends PVector  {
 		waiting = false;
 		nextAction();
 	}
-
+	
+	//---------------------------------- <    DRAW VECTOR SHAPES AND CHARACTERS     >-------------------------------------
+	public void drawChar( char c ){
+		int charWidth; 
+		PVector lastPos = new PVector();
+		int[] code = PointerController.getHersheyCode(c);
+		
+		charWidth = code[1];
+		lastPos.x = code[2];
+		lastPos.y = code[3];
+		
+		System.out.println("lastPos.x:" + lastPos.x +",lastPos.y:"+ lastPos.y );
+		
+		//fix initial position
+		lastPos = getCharCodePosition(lastPos, charWidth); //?? last position is contaminated by absolute prompt position??
+		
+		//LASER OFF:
+		actLaserOff();
+		
+		//move to initial position
+		
+		System.out.println("moveToIniPos:  lastPos: "+ lastPos );
+		moveToDraw( lastPos, 0);
+		wait(500); 
+		
+		for (int i = 2; i < Math.min(code[0]*2 + 1 , 112) ; i+=2) {  //loop starts on index 2 and iterates skipping 1 line
+			//inside this loop commands to draw lines or just move to places will be performed:
+			
+			PVector offsetPos = getCharCodePosition( new PVector(code[i], code[i+1]), charWidth);
+			System.out.println("position:" + i +", code[i]:"+ offsetPos.x + " code[i+1]:" + offsetPos.y);
+			
+			
+			//DRAW LINE
+			if (code[i] != -1 && lastPos.x != -1 ) { 
+				//System.out.println("  > drawLine:  code[i]:"+ offsetPos.x + " code[i+1]:" + offsetPos.y);
+				moveToDraw( offsetPos, laserMaxBrightness );
+			}
+			
+			//LASER OFF
+			else if (code[i] == -1){
+				//System.out.println("  > Stop:  code[i]:"+ offsetPos.x + " code[i+1]:" + offsetPos.y);
+				wait(100);
+				actLaserOff();
+				wait(100);
+			}
+			
+			//MOVE TO
+			else if  ( lastPos.x == -1 ) {
+				//System.out.println("  > moveTo:  code[i]:"+ offsetPos.x + " code[i+1]:" + offsetPos.y);
+				moveToDraw( offsetPos, 0 );
+				wait(250);
+			}
+						
+			else{
+				//System.out.println("this case also exists: code[i]:"+code[i] + " lastPos.x:" + lastPos.x);
+			}
+			lastPos.x = code[i];
+			lastPos.y = code[i+1];
+			
+		}
+		//FINISH 
+		actLaserOff();
+		wait(250);
+		//set character new position;
+		
+		nextAction();
+	}
+	
+	
+	PVector getCharCodePosition( PVector lastPos , int charWidth ){
+		PVector charPos = PointerController.promptPosition;
+		float s = PointerController.charSize;
+		if(PointerController.charCenterAlign){
+			return new PVector (  charPos.x + (lastPos.x-(charWidth/2))*s , charPos.y+lastPos.y*s ); //y inverted
+		}else{
+			return new PVector (  charPos.x + lastPos.x*s , charPos.y + lastPos.y*s ); //y inverted
+		}
+	}
+	
+	
+	public void drawRectangle(){
+		moveToDraw( new PVector(servoRangeX[0], servoRangeY[0]), 0);
+		wait(500); 
+		moveToDraw( new PVector(servoRangeX[1], servoRangeY[0]), laserMaxBrightness);
+		moveToDraw( new PVector(servoRangeX[1], servoRangeY[1]), 1);
+		moveToDraw( new PVector(servoRangeX[0], servoRangeY[1]), laserMaxBrightness);
+		moveToDraw( new PVector(servoRangeX[0], servoRangeY[0]), laserMaxBrightness);
+		actLaserOff();
+		wait(500); 
+		//moveToDraw( new PVector(servoRangeX[0], servoRangeY[0]), 0);
+		moveToDraw( new PVector(90,90), 0);
+		nextAction();
+	}
+	
 	//---------------------------------- <  NEXT ACTION IN LIST  >-------------------------------------
 
 	public void nextAction(){
@@ -588,6 +715,13 @@ public class PointerDevice extends PVector  {
 		s.endShape();
 		return s;
 	}
+	
+	
+	//---------------------------------- <  DRAWING, DISPLAY  >-------------------------------------
+	private void drawOnCanvas(){
+		PointerController.canvas.drawPointer(this);
+	}
+	
 
 
 }
