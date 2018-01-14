@@ -2,7 +2,7 @@
 <classpath>
 	<classpathentry kind="src" output="bin" path="src"/>
 	<classpathentry exported="true" kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
-	<classpathentry kind="lib" path="/Users/tomyken/Documents/workspace/libs/core.jar"/>
+	<classpathentry kind="lib" path="/Users/tomyken/Documents/workspace/libs/core.jar" sourcepath="/Applications/Processing.app/Contents/Java/core/library/core.jar"/>
 	<classpathentry kind="src" path="/Game"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/ProjectionMatrix"/>
 	<classpathentry kind="lib" path="/Users/tomyken/Documents/Processing/libraries/Game/library/Game.jar"/>
@@ -10,5 +10,6 @@
 	<classpathentry kind="lib" path="/Applications/Processing.app/Contents/Java/modes/java/libraries/serial/library/jssc.jar"/>
 	<classpathentry kind="lib" path="/Applications/Processing.app/Contents/Java/modes/java/libraries/serial/library/serial.jar"/>
 	<classpathentry kind="lib" path="/Applications/Processing.app/Contents/Java/modes/java/libraries/serial/bin/processing/serial"/>
+	<classpathentry kind="lib" path="/Library/Java/Extensions/RXTXcomm.jar"/>
 	<classpathentry kind="output" path="resources/code"/>
 </classpath>

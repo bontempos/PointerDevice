@@ -1,0 +1,61 @@
+{
+	"environments":[{
+		"name": "file_name",
+		"tag":  ["tag"],	
+		"settings":{
+			"pointer_controller":{
+				"properties":[{"property":0}],
+				"pointers":[{
+					"pointer":{
+						"settings":{
+							"label": "label",
+							"id_color":	0,
+							"servo_speedM": 0,
+							"initial_position": [0,0],
+							"laser_max_brightnessM": 0,
+							"translation":[0,0,0],
+							"rotation":[0,0,0]
+						},
+						"projection_plane":{
+							"apperture": 0,
+							"center_position": [0,0],
+							"corners":[{
+								"0": [0,0]
+							}],
+							"correspondent_points":{
+								"p3d":[{
+									"0": [0,0,0]
+								}],
+								"p2d":[{
+									"0": [0,0]
+								}]
+							}
+						}
+					}
+				}]
+			},
+			"pointer_clusters":[{
+					"label": "label",
+					"list":[{
+						"pointer_id" : 0
+					}]
+				}],
+			"surfaces":[{
+				"surface":{
+					"labe":"label",
+					"color":0,
+					"physical_width":0,
+					"physical.height":0,
+					"translation":[0,0,0],
+					"rotation":[0,0,0]
+				}
+			}],
+			"projection_masks":[{
+				"projection_mask":{
+					"surface_id" : 0,
+					"pointer_id" : 0
+				}
+			}]
+		}
+	}]
+}
